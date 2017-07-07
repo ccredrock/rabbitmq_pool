@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author ccredrock@gmail.com
-%%% @copyright (C) 2017, <meituan>
+%%% @copyright (C) 2017, <free>
 %%% @doc
 %%%
 %%% @end
@@ -10,7 +10,8 @@
 
 -export([start/0, stop/0]).
 
--export([start_link/1,
+-export([start_link/0,
+         channel_call/1,
          channel_call/2]).
 
 -export([get_connects/0,
@@ -28,7 +29,7 @@
 %%------------------------------------------------------------------------------
 -behaviour(gen_server).
 
--include("../deps/amqp_client/include/amqp_client.hrl").
+-include_lib("amqp_client/include/amqp_client.hrl").
 
 -define(TIMEOUT, 5000).
 
@@ -52,6 +53,9 @@ start() ->
 
 stop() ->
     application:stop(?MODULE).
+
+channel_call(Method) ->
+    channel_call(Method, none).
 
 channel_call(Method, Content) ->
     List = ets:tab2list(?ETS_LONE_CHANNELS),
@@ -95,15 +99,19 @@ add_pools(Pools) ->
     gen_server:call(?MODULE, {add_pools, Pools}).
 
 %%------------------------------------------------------------------------------
-start_link(Pools) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Pools], []).
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%------------------------------------------------------------------------------
-init([Pools]) ->
+init([]) ->
     ets:new(?ETS_LONE_CHANNELS, [named_table, public, {read_concurrency, true}]),
+    Pools = proplists:delete(included_applications, application:get_all_env(rabbitmq_pool)),
     List = lists:flatten([lists:duplicate(proplists:get_value(connect_size, Prop), {connect, Prop})
                           || {_Name, Prop}  <- Pools]),
-    {ok, #state{deads = List}, 0}.
+    case do_check_deads(List, #state{deads = []}) of
+        #state{deads = []} = State -> {ok, State, 0};
+        #state{deads = [Dead | _]} -> {error, Dead}
+    end.
 
 handle_call(get_channels, _From, State) ->
     {reply, {[Channel || {Channel, _} <- ets:tab2list(?ETS_LONE_CHANNELS)],
@@ -129,8 +137,8 @@ terminate(_Reason, _State) ->
     ok.
 
 handle_info(timeout, State) ->
-    erlang:send_after(?TIMEOUT, self(), timeout),
     State1 = do_check_deads(State#state.deads, State#state{deads = []}),
+    erlang:send_after(?TIMEOUT, self(), timeout),
     {noreply, State1};
 
 handle_info({'DOWN', _Ref, process, PID, _Reason}, State) ->
