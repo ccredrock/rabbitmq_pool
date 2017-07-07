@@ -1,0 +1,12 @@
+{application, rabbitmq_pool,
+ [
+  {description, ""},
+  {vsn, "1.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, {rabbitmq_pool_app, []}},
+  {env, []}
+]}.
