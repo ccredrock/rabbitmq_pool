@@ -129,8 +129,8 @@ terminate(_Reason, _State) ->
     ok.
 
 handle_info(timeout, State) ->
-    erlang:send_after(?TIMEOUT, self(), timeout),
     State1 = do_check_deads(State#state.deads, State#state{deads = []}),
+    erlang:send_after(?TIMEOUT, self(), timeout),
     {noreply, State1};
 
 handle_info({'DOWN', _Ref, process, PID, _Reason}, State) ->
