@@ -28,7 +28,7 @@
 %%------------------------------------------------------------------------------
 -behaviour(gen_server).
 
--include("../deps/amqp_client/include/amqp_client.hrl").
+-include_lib("amqp_client/include/amqp_client.hrl").
 
 -define(TIMEOUT, 5000).
 
