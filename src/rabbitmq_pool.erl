@@ -11,6 +11,7 @@
 -export([start/0, stop/0]).
 
 -export([start_link/1,
+         channel_call/1,
          channel_call/2]).
 
 -export([get_connects/0,
@@ -52,6 +53,9 @@ start() ->
 
 stop() ->
     application:stop(?MODULE).
+
+channel_call(Method) ->
+    channel_call(Method, none).
 
 channel_call(Method, Content) ->
     List = ets:tab2list(?ETS_LONE_CHANNELS),
