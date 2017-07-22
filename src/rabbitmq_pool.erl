@@ -107,7 +107,10 @@ init([Pools]) ->
     ets:new(?ETS_LONE_CHANNELS, [named_table, public, {read_concurrency, true}]),
     List = lists:flatten([lists:duplicate(proplists:get_value(connect_size, Prop), {connect, Prop})
                           || {_Name, Prop}  <- Pools]),
-    {ok, #state{deads = List}, 0}.
+    case do_check_deads(List, #state{deads = []}) of
+        #state{deads = []} = State -> {ok, State, 0};
+        #state{deads = Deads} -> {error, Deads}
+    end.
 
 handle_call(get_channels, _From, State) ->
     {reply, {[Channel || {Channel, _} <- ets:tab2list(?ETS_LONE_CHANNELS)],
