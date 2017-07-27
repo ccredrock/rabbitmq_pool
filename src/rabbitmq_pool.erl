@@ -109,7 +109,7 @@ init([Pools]) ->
                           || {_Name, Prop}  <- Pools]),
     case do_check_deads(List, #state{deads = []}) of
         #state{deads = []} = State -> {ok, State, 0};
-        #state{deads = Deads} -> {error, Deads}
+        #state{deads = [Dead | _]} -> {error, Dead}
     end.
 
 handle_call(get_channels, _From, State) ->
