@@ -8,7 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(rabbitmq_pool_sup).
 
--export([start_link/0, start_link/1]).
+-export([start_link/0]).
 -export([init/1]).
 
 %%------------------------------------------------------------------------------
@@ -16,13 +16,9 @@
 
 %%------------------------------------------------------------------------------
 start_link() ->
-    Pools = proplists:delete(included_applications, application:get_all_env(rabbitmq_pool)),
-    start_link(Pools) .
-
-start_link(Pools) ->
     {ok, Sup} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
     {ok, _} = supervisor:start_child(?MODULE, {rabbitmq_pool,
-                                               {rabbitmq_pool, start_link, [Pools]},
+                                               {rabbitmq_pool, start_link, []},
                                                transient, infinity, worker,
                                                [rabbitmq_pool]}),
     {ok, Sup}.
