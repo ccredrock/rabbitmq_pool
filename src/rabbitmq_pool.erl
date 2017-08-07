@@ -10,7 +10,7 @@
 
 -export([start/0, stop/0]).
 
--export([start_link/1,
+-export([start_link/0,
          channel_call/1,
          channel_call/2]).
 
@@ -99,12 +99,13 @@ add_pools(Pools) ->
     gen_server:call(?MODULE, {add_pools, Pools}).
 
 %%------------------------------------------------------------------------------
-start_link(Pools) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Pools], []).
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%------------------------------------------------------------------------------
-init([Pools]) ->
+init([]) ->
     ets:new(?ETS_LONE_CHANNELS, [named_table, public, {read_concurrency, true}]),
+    Pools = proplists:delete(included_applications, application:get_all_env(rabbitmq_pool)),
     List = lists:flatten([lists:duplicate(proplists:get_value(connect_size, Prop), {connect, Prop})
                           || {_Name, Prop}  <- Pools]),
     case do_check_deads(List, #state{deads = []}) of
