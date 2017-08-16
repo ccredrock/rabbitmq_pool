@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author ccredrock@gmail.com
-%%% @copyright (C) 2017, <meituan>
+%%% @copyright (C) 2017, <free>
 %%% @doc
 %%%
 %%% @end
