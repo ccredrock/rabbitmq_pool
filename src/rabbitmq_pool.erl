@@ -315,7 +315,7 @@ do_find_deads(PID, MRef, #state{deads = Deads,
         maps:is_key(PID, ConnectSet) andalso throw(connect_dead),
         maps:is_key(PID, BProcessSet) andalso throw(bind_process_dead),
         maps:is_key(PID, BChannelSet) andalso throw(bind_channel_dead),
-        maps:is_key(PID, LoneWait) andalso throw(lone_wait_dead),
+        queue:member(PID, LoneWait) andalso throw(lone_wait_dead),
         ets:lookup(?ETS_LONE_CHANNELS, PID) =/= [] andalso throw(lone_channel_dead),
         throw(lone_user_dead)
     catch
