@@ -1,30 +1,29 @@
 ERL=erl
-BEAMDIR=./deps/*/ebin ./ebin
 REBAR=./rebar
+BEAMDIR=./deps/*/ebin ./ebin
 
-all: clean get-deps update-deps compile xref
-
-update-deps:
-	@$(REBAR) update-deps
-
-get-deps:
-	@$(REBAR) get-deps
-
+.PHONY: deps doc test
 compile:
 	@$(REBAR) compile
+
+clean:
+	@$(REBAR) clean
+
+deps:
+	@$(REBAR) get-deps
+	@$(REBAR) update-deps
 
 xref:
 	@$(REBAR) xref skip_deps=true
 
-clean: 
-	@ $(REBAR) clean
+doc:
+	@$(REBAR) skip_deps=true doc
 
-eunit:
+test:
 	@rm -rf .eunit
 	@mkdir -p .eunit
-	@ERL_FLAGS="-config test.config" $(REBAR) skip_deps=true eunit 
+	@ERL_FLAGS="-config lager.config -config test.config" $(REBAR) skip_deps=true eunit
 
-test: eunit
+run:
+	@$(ERL) -pa ebin -pa deps/*/ebin -config lager.config -config test.config -s rabbitmq_pool start
 
-edoc:
-	@$(REBAR) skip_deps=true doc

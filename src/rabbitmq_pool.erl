@@ -1,17 +1,14 @@
 %%%-------------------------------------------------------------------
 %%% @author ccredrock@gmail.com
-%%% @copyright (C) 2017, <free>
-%%% @doc
-%%%
+%%% @copyright 2017 redrock
+%%% @doc rabbitmq pool
 %%% @end
-%%% Created : 2017年07月05日19:11:34
 %%%-------------------------------------------------------------------
 -module(rabbitmq_pool).
 
--export([start/0, stop/0]).
+-export([start/0]).
 
--export([start_link/0,
-         channel_call/1,
+-export([channel_call/1,
          channel_call/2,
          channel_cast/1,
          channel_cast/2,
@@ -31,12 +28,15 @@
          get_lone_free/0,
          get_lone_wait/0,
          get_lone_busy/0,
-         add_pools/1]).
+         add_pools/1,
+         add_pools/2]).
 
 %% callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3]).
+-export([start_link/0]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
+%%------------------------------------------------------------------------------
+%% @doc define
 %%------------------------------------------------------------------------------
 -behaviour(gen_server).
 
@@ -50,31 +50,40 @@
 -define(RECONNECT_REFRESH, refresh_all).
 -define(RECONNECT_SINGLE,  single_one).
 
--define(PUBLISH_CONFIRM,  confirm).
-
 -define(INFO(F, A), error_logger:info_msg("rabbitmq_pool " ++ F, A)).
 -define(WARN(F, A), error_logger:warning_msg("rabbitmq_pool " ++ F, A)).
 
+-define(STATE(), sys:get_state(?MODULE)).
+-define(PARSE_POOL(L),
+        lists:flatten([lists:duplicate(proplists:get_value(connect_size, P, 1), {connect, P}) || {_, P} <- L])).
+
 -define(AMQP_NETWORK(List),
         #amqp_params_network{host         = proplists:get_value(host, List),
-                             port         = proplists:get_value(port, List),
+                             port         = proplists:get_value(port, List, 5672),
                              username     = proplists:get_value(username, List),
                              password     = proplists:get_value(password, List),
-                             virtual_host = proplists:get_value(virtual_host, List)}).
+                             virtual_host = proplists:get_value(virtual_host, List, <<"/">>)}).
 
 -record(state, {connects     = #{},
                 bind_channel = #{},
                 bind_process = #{},
-                lone_free = [],
-                lone_wait = queue:new(),
-                deads = []}).
+                lone_free    = [],
+                lone_wait    = queue:new(),
+                deads        = []}).
 
 %%------------------------------------------------------------------------------
+%% @doc interface
+%%------------------------------------------------------------------------------
+-spec start() -> {ok, []} | {error, any()}.
 start() ->
-    application:start(?MODULE).
+    application:ensure_all_started(?MODULE).
 
-stop() ->
-    application:stop(?MODULE).
+%%------------------------------------------------------------------------------
+add_pools(Pools) ->
+    gen_server:call(?MODULE, {add_pools, Pools}).
+
+add_pools(Pools, Timeout) ->
+    gen_server:call(?MODULE, {add_pools, Pools}, Timeout).
 
 channel_call(Method) -> channel_call(Method, none).
 channel_call(Method, Content) ->
@@ -84,6 +93,7 @@ channel_call(Method, Content) ->
             {Channel, _} = lists:nth(rand:uniform(length(List)), List),
             channel_call(Channel, Method, Content)
     end.
+
 channel_call(Channel, Method, Content) ->
     try
         case amqp_channel:call(Channel, Method, Content) of
@@ -105,6 +115,7 @@ channel_cast(Method, Content) ->
             amqp_channel:cast(Channel, Method, Content)
     end.
 
+%%------------------------------------------------------------------------------
 checkout_lone() ->
     CRef = make_ref(),
     try
@@ -131,7 +142,8 @@ publish(Exchange, Payload) ->
 safe_publish(Exchange, Payload) -> safe_publish(Exchange, Payload, <<>>).
 safe_publish(Exchange, Payload, RoutingKey) ->
     case catch checkout_lone() of
-        {'EXIT', Reason} -> {error, Reason};
+        {'EXIT', Reason} ->
+            {error, Reason};
         Channel ->
             try
                 Content = #amqp_msg{props = #'P_basic'{delivery_mode = 2}, payload = Payload},
@@ -145,35 +157,18 @@ safe_publish(Exchange, Payload, RoutingKey) ->
     end.
 
 %%------------------------------------------------------------------------------
-get_connects() ->
-    State = sys:get_state(?MODULE),
-    [PID || {PID, _} <- maps:to_list(State#state.connects)].
+get_connects()      -> [X || {X, _} <- maps:to_list(element(#state.connects, ?STATE()))].
+get_lone_channels() -> [X || {X, _} <- ets:tab2list(?ETS_LONE_CHANNELS)].
+get_bind_channels() -> maps:keys(element(#state.bind_channel, ?STATE())).
+get_channels()      -> {get_lone_channels(), get_bind_channels()}.
+get_processes()     -> maps:keys(element(#state.bind_process, ?STATE())).
+get_deads()         -> element(#state.deads, ?STATE()).
+get_lone_wait()     -> element(#state.lone_wait, ?STATE()).
+get_lone_free()     -> element(#state.lone_free, ?STATE()).
+get_lone_busy()     -> ets:tab2list(?ETS_LONE_BUSY).
 
-get_channels() ->
-    State = sys:get_state(?MODULE),
-    [Channel || {Channel, _} <- ets:tab2list(?ETS_LONE_CHANNELS)], maps:keys(State#state.bind_channel).
-
-get_lone_channels() ->
-    case get_channels() of
-        {Lone, _Bind} -> Lone;
-        Result -> Result
-    end.
-
-get_bind_channels() ->
-    case get_channels() of
-        {_Lone, Bind} -> Bind;
-        Result -> Result
-    end.
-
-get_processes() -> maps:keys(element(#state.bind_process, sys:get_state(?MODULE))).
-get_deads() -> element(#state.deads, sys:get_state(?MODULE)).
-get_lone_wait() -> element(#state.lone_wait, sys:get_state(?MODULE)).
-get_lone_free() -> element(#state.lone_free, sys:get_state(?MODULE)).
-get_lone_busy() -> ets:tab2list(?ETS_LONE_BUSY).
-
-add_pools(Pools) ->
-    gen_server:call(?MODULE, {add_pools, Pools}).
-
+%%------------------------------------------------------------------------------
+%% @doc gen_server
 %%------------------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -181,18 +176,15 @@ start_link() ->
 %%------------------------------------------------------------------------------
 init([]) ->
     ets:new(?ETS_LONE_CHANNELS, [named_table, public, {read_concurrency, true}]),
-    ets:new(?ETS_LONE_BUSY, [named_table, private]),
+    ets:new(?ETS_LONE_BUSY, [named_table, public]),
     Pools = do_forward_compatible_pools(),
-    List = lists:flatten([lists:duplicate(proplists:get_value(connect_size, Prop), {connect, Prop})
-                          || {_Name, Prop}  <- Pools]),
-    case do_reborn_deads(List, #state{deads = []}) of
+    case do_reborn_deads(?PARSE_POOL(Pools), #state{deads = []}) of
         #state{deads = []} = State -> {ok, State, 0};
         #state{deads = [Dead | _]} -> {error, {fail_connect, Dead}}
     end.
 
 handle_call({add_pools, Pools}, _From, State) ->
-    List = [lists:duplicate(proplists:get_value(connect_size, Prop), {connect, Prop}) || {_Name, Prop}  <- Pools],
-    {reply, ok, State#state{deads = [State#state.deads | List]}};
+    {reply, ok, do_reborn_deads(?PARSE_POOL(Pools), State)};
 handle_call({checkout_lone, CRef}, From, State) ->
     {noreply, do_checkout_lone(CRef, From, State)};
 handle_call(_Call, _From, State) ->
@@ -239,7 +231,7 @@ do_reborn_deads([{connect, Prop} = H | T],
         {ok, Connect} ->
             ?INFO("conenct start:~p,~p", [Connect, Prop]),
             erlang:monitor(process, Connect),
-            List = lists:duplicate(proplists:get_value(channel_size, Prop), {channel, Connect, Prop}),
+            List = lists:duplicate(proplists:get_value(channel_size, Prop, 1), {channel, Connect, Prop}),
             State1 = State#state{connects = ConnectSet#{Connect => #{prop => Prop, childs => []}}},
             do_reborn_deads(T ++ List, State1);
         _ ->
@@ -321,35 +313,35 @@ do_find_deads(PID, MRef, #state{deads = Deads,
     catch
         throw:connect_dead ->
             {ok, #{childs := Childs, prop := Prop}} = maps:find(PID, ConnectSet),
-            ?INFO("connect stop:~p,~p", [PID, Prop]),
+            ?INFO("connect stop:~p, ~p", [PID, Prop]),
             ConnectSet1 = maps:remove(PID, ConnectSet),
             do_check_refresh(PID, Prop),
             [exit(Process, shutdown) || Process <- Childs],
             State#state{connects = ConnectSet1, deads = [{connect, Prop} | Deads]};
         throw:bind_process_dead ->
             {ok, #{connect := Connect, channel := Channel, prop := Prop}} = maps:find(PID, BProcessSet),
-            ?INFO("bind process stop:~p,~p", [PID, Prop]),
+            ?INFO("bind process stop:~p, ~p", [PID, Prop]),
             State#state{bind_process = maps:remove(PID, BProcessSet),
                         connects = do_child_del(ConnectSet, Connect, childs, PID),
                         deads = [{process, Connect, Channel, Prop} | Deads]};
         throw:bind_channel_dead ->
-            {ok, #{connect := Connect, process := Process, prop := Prop}} = maps:find(PID, BChannelSet),
-            ?INFO("bind channel stop:~p,~p", [PID, Prop]),
-            exit(Process, shutdown),
+            {ok, #{connect := Connect, prop := Prop} = M} = maps:find(PID, BChannelSet),
+            ?INFO("bind channel stop:~p, ~p", [PID, Prop]),
+            catch exit(maps:get(process, M, undefined), shutdown),
             State#state{bind_channel = maps:remove(PID, BChannelSet),
                         deads = [{channel, Connect, Prop} | Deads]};
         throw:lone_channel_dead ->
             [{PID, #{connect := Connect, prop := Prop}}] = ets:lookup(?ETS_LONE_CHANNELS, PID),
-            ?INFO("lone channel stop:~p,~p", [PID, Prop]),
+            ?INFO("lone channel stop:~p, ~p", [PID, Prop]),
             ets:delete(?ETS_LONE_CHANNELS, PID),
             ets:delete(?ETS_LONE_BUSY, PID),
             State#state{deads = [{channel, Connect, Prop} | Deads],
                         lone_free = lists:delete(PID, LoneFree)};
         throw:lone_wait_dead ->
-            ?INFO("lone wait stop:~p,~p", [PID, MRef]),
+            ?INFO("lone wait stop:~p, ~p", [PID, MRef]),
             State#state{lone_wait = queue:filter(fun ({_, _, R}) -> R =/= MRef end, State#state.lone_wait)};
         throw:lone_user_dead ->
-            ?INFO("lone user stop:~p,~p", [PID, MRef]),
+            ?INFO("lone user stop:~p, ~p", [PID, MRef]),
             case ets:match(?ETS_LONE_BUSY, {'$1', '_', MRef}) of
                 [[Channel]] ->
                     ets:delete(?ETS_LONE_BUSY, Channel),
@@ -424,7 +416,7 @@ do_cancel_wait(CRef, #state{lone_wait = Wait} = State) ->
         [[Channel, MRef]] ->
             demonitor(MRef, [flush]),
             true = ets:delete(?ETS_LONE_BUSY, Channel),
-            do_checkin_lone(Channel, State);
+            do_checkin_lone1(Channel, State);
         [] ->
             Cancel = fun({_, Ref, MRef}) when Ref =:= CRef ->
                              demonitor(MRef, [flush]),
