@@ -15,7 +15,9 @@
 
 %%------------------------------------------------------------------------------
 start(_StartType, _StartArgs) ->
-    rabbitmq_pool_sup:start_link().
+    Result =rabbitmq_pool_sup:start_link(),
+    rabbitmq_pool:init(),
+    Result.
 
 stop(_State) ->
     ok.

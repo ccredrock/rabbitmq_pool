@@ -22,8 +22,7 @@ doc:
 test:
 	@rm -rf .eunit
 	@mkdir -p .eunit
-	@ERL_FLAGS="-config lager.config -config test.config" $(REBAR) skip_deps=true eunit
+	@ERL_FLAGS="-config test.config" $(REBAR) skip_deps=true eunit
 
 run:
-	@$(ERL) -pa ebin -pa deps/*/ebin -config lager.config -config test.config -s rabbitmq_pool start
-
+	@$(ERL) -pa ebin -pa deps/*/ebin -config test.config -s rabbitmq_pool start
