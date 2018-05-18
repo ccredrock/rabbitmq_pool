@@ -4,8 +4,8 @@
 %%% @doc rabbitmq pool
 %%% @end
 %%%-------------------------------------------------------------------
--ifndef(COMMON_HRL).
--define(COMMON_HRL, true).
+-ifndef(RABBITMQ_POOL_HRL).
+-define(RABBITMQ_POOL_HRL, true).
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 
