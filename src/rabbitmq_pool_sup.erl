@@ -23,14 +23,12 @@ init([]) ->
     {ok, {{one_for_one, 1, 60}, []}}.
 
 start_bind(Pool, Props) ->
-    io:format("add ~p~n", [Pool]),
     supervisor:start_child(?MODULE, {Pool,
                                      {rmp_bind, start_link, [{Pool, Props}]},
                                      transient, infinity, worker,
                                      []}).
 
 start_lone(Pool, Props) ->
-    io:format("add ~p~n", [Pool]),
     supervisor:start_child(?MODULE, {Pool,
                                      {rmp_lone, start_link, [{Pool, Props}]},
                                      transient, infinity, worker,

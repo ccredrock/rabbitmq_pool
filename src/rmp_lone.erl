@@ -23,7 +23,7 @@
 
 -define(TIMEOUT, 5000).
 
--record(state, {total_ets    = undefined,
+-record(state, {channel_ets  = 0,
                 busy_ets     = undefined,
                 connects     = #{},
                 lone_free    = [],
@@ -56,11 +56,13 @@ start_link(Args) ->
 init([{Pool, Prop}]) ->
     Channels = ets:new(channel, [public, {read_concurrency, true}]),
     Busy = ets:new(busy, [public]),
-    rabbitmq_pool:add_lone(Pool, Channels, Busy),
     case do_reborn_deads(rmp_util:parse_pool(Pool, Prop),
-                         #state{total_ets = Channels, busy_ets = Busy, deads = []}) of
-        #state{deads = []} = State -> {ok, State, 0};
-        #state{deads = [Dead | _]} -> {error, {fail_connect, Dead}}
+                         #state{channel_ets = Channels, busy_ets = Busy, deads = []}) of
+        #state{deads = []} = State ->
+            rabbitmq_pool:add_lone(Pool, Channels, Busy),
+            {ok, State, 0};
+        #state{deads = [Dead | _]} ->
+            {error, {fail_connect, {Dead, get(reborn_fail)}}}
     end.
 
 handle_call({checkout_lone, CRef}, From, State) ->
@@ -101,7 +103,8 @@ do_reborn_deads([{connect, Prop} = H | T],
             List = lists:duplicate(proplists:get_value(channel_size, Prop, 1), {channel, Connect, Prop}),
             State1 = State#state{connects = ConnectSet#{Connect => #{prop => Prop, childs => []}}},
             do_reborn_deads(T ++ List, State1);
-        _ ->
+        Reason ->
+            put(reborn_fail, Reason),
             do_reborn_deads(T, State#state{deads = [H | Deads]})
     end;
 do_reborn_deads([{channel, Connect, Prop} = H | T],
@@ -113,9 +116,10 @@ do_reborn_deads([{channel, Connect, Prop} = H | T],
                     ?INFO("lone channel start:~p,~p", [Channel, Prop]),
                     do_check_confirm(Channel),
                     erlang:monitor(process, Channel),
-                    ets:insert(State#state.total_ets, {Channel, #{connect => Connect, prop => Prop}}),
+                    ets:insert(State#state.channel_ets, {Channel, #{connect => Connect, prop => Prop}}),
                     do_reborn_deads(T, State#state{lone_free = [Channel | State#state.lone_free]});
-                _ ->
+                Reason ->
+                    put(reborn_fail, Reason),
                     do_reborn_deads(T, State#state{deads = [H | Deads]})
             end;
         false ->
@@ -137,7 +141,7 @@ do_find_deads(PID, Reason, MRef, #state{deads = Deads,
     try
         maps:is_key(PID, ConnectSet) andalso throw(connect_dead),
         queue:member(PID, LoneWait) andalso throw(lone_wait_dead),
-        ets:lookup(State#state.total_ets, PID) =/= [] andalso throw(lone_channel_dead),
+        ets:lookup(State#state.channel_ets, PID) =/= [] andalso throw(lone_channel_dead),
         throw(lone_user_dead)
     catch
         throw:connect_dead ->
@@ -147,9 +151,9 @@ do_find_deads(PID, Reason, MRef, #state{deads = Deads,
             [exit(Process, shutdown) || Process <- Childs],
             State#state{connects = ConnectSet1, deads = [{connect, Prop} | Deads]};
         throw:lone_channel_dead ->
-            [{PID, #{connect := Connect, prop := Prop}}] = ets:lookup(State#state.total_ets, PID),
+            [{PID, #{connect := Connect, prop := Prop}}] = ets:lookup(State#state.channel_ets, PID),
             ?INFO("lone channel stop:~p, ~p, ~p", [PID, Reason, Prop]),
-            ets:delete(State#state.total_ets, PID),
+            ets:delete(State#state.channel_ets, PID),
             ets:delete(State#state.busy_ets, PID),
             State#state{deads = [{channel, Connect, Prop} | Deads],
                         lone_free = lists:delete(PID, LoneFree)};
