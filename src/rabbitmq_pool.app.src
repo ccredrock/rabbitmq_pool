@@ -2,7 +2,7 @@
 %% ex: ts=4 sw=4 ft=erlang et
 {application, rabbitmq_pool,
  [{description, "rabbitmq pool"},
-  {vsn, "2.1"},
+  {vsn, "2.2"},
   {registered, []},
   {applications, [kernel, stdlib, rabbit_common, amqp_client]},
   {mod, {rabbitmq_pool_app, []}},

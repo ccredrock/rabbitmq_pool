@@ -9,7 +9,15 @@
 -export([parse_pool/2]).
 -export([map_set/4, map_add/4, map_del/4]).
 -export([safe_cast/2, safe_eval/2]).
+-export([connect/1]).
 
+%%------------------------------------------------------------------------------
+%% define
+%%------------------------------------------------------------------------------
+-include("rabbitmq_pool.hrl").
+
+%%------------------------------------------------------------------------------
+%% interface
 %%------------------------------------------------------------------------------
 parse_pool(Pool, Prop) ->
     lists:duplicate(proplists:get_value(connect_size, Prop, 1), {connect, [{pool, Pool} | Prop]}).
@@ -61,4 +69,21 @@ safe_eval(PID, Fun, RetryCnt, _Cnt) ->
                     end
             end
     end.
+
+connect(Prop) ->
+    case proplists:get_value(nodes, Prop) of
+        undefined ->
+            connect1([Prop], undefined);
+        List ->
+            Prop1 = proplists:delete(port, proplists:delete(host, Prop)),
+            connect1(lists:sort([Prop1 ++ [{host, Host}, {port, Port}] || {Host, Port} <- List]), undefined)
+    end.
+
+connect1([Prop | T], _) ->
+    case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
+        {ok, Connect} -> {ok, Connect};
+        Result -> connect1(T, Result)
+    end;
+connect1([], Result) ->
+    Result.
 

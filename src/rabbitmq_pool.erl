@@ -25,6 +25,7 @@
          hash_confirm/6]).
 
 -export([get_pools/0,
+         get_props/1,
          get_deads/1,
          get_connects/1,
          get_channels/1,
@@ -32,8 +33,8 @@
 
 -export([add_pools/1,
          add_pools/2,
-         add_lone/3,
-         add_bind/2]).
+         add_lone/4,
+         add_bind/3]).
 
 -export([pool_process/1,
          checkout_lone/1,
@@ -49,7 +50,7 @@
 
 -define(TIMEOUT, 5000).
 
--record(pool, {name, process, args}).
+-record(pool, {name, type, prop, process, args}).
 
 %%------------------------------------------------------------------------------
 %% @doc interface
@@ -74,11 +75,13 @@ add_pools(Pools, _Timeout) ->
          end
      end || {Pool, Prop} <- Pools].
 
-add_lone(Name, Channels, Busy) ->
-    ets:insert(?MODULE, #pool{name = Name, process = self(), args = #{channel_ets => Channels, busy_ets => Busy}}).
+add_lone(Name, Prop, Channels, Busy) ->
+    ets:insert(?MODULE, #pool{name = Name, type = lone, prop = Prop,
+                              process = self(), args = #{channel_ets => Channels, busy_ets => Busy}}).
 
-add_bind(Name, Processes) ->
-    ets:insert(?MODULE, #pool{name = Name, process = self(), args = #{process_ets => Processes}}).
+add_bind(Name, Prop, Processes) ->
+    ets:insert(?MODULE, #pool{name = Name, type = bind, prop = Prop,
+                              process = self(), args = #{process_ets => Processes}}).
 
 %%------------------------------------------------------------------------------
 channel_call(Method) -> channel_call(Method, none).
@@ -178,37 +181,36 @@ checkin_lone(Process, Channel) ->
 
 %%------------------------------------------------------------------------------
 get_pools() ->
-    ets:tab2list(?MODULE).
+    [Name || #pool{name = Name} <- ets:tab2list(?MODULE)].
+
+get_props(Pool) ->
+    element(#pool.prop, hd(ets:lookup(?MODULE, Pool))).
 
 get_deads(Pool) ->
     Proc = pool_process(Pool),
     case ets:lookup(?MODULE, Pool) of
-        [#pool{process = Proc, args = #{busy_ets := _}}] ->
-            rmp_lone:get_deads(Proc);
-        [#pool{process = Proc}] ->
-            rmp_bind:get_deads(Proc)
+        [#pool{type = lone, process = Proc}] -> rmp_lone:get_deads(Proc);
+        [#pool{process = Proc}] -> rmp_bind:get_deads(Proc)
     end.
 
 get_connects(Pool) ->
     Proc = pool_process(Pool),
     case ets:lookup(?MODULE, Pool) of
-        [#pool{process = Proc, args = #{busy_ets := _}}] ->
-            rmp_lone:get_connects(Proc);
-        [#pool{process = Proc}] ->
-            rmp_bind:get_connects(Proc)
+        [#pool{type = lone, process = Proc}] -> rmp_lone:get_connects(Proc);
+        [#pool{process = Proc}] -> rmp_bind:get_connects(Proc)
     end.
 
 get_channels(Pool) ->
     case ets:lookup(?MODULE, Pool) of
-        [#pool{process = Proc, args = #{channel_ets := Channels, busy_ets := Busy}}] ->
-            rmp_lone:get_channels(Proc, Channels, Busy);
-        [#pool{process = Proc}] ->
-            rmp_bind:get_channels(Proc)
+        [#pool{type = lone, args = #{channel_ets := Channels}}] -> rmp_lone:get_channels(Channels);
+        [#pool{process = Proc}] -> rmp_bind:get_channels(Proc)
     end.
 
 get_processes(Pool) ->
-    [#pool{args = #{process_ets := ETS}}] = ets:lookup(?MODULE, Pool),
-    rmp_bind:get_processes(ETS).
+    case ets:lookup(?MODULE, Pool) of
+        [#pool{args = #{process_ets := ETS}}] -> rmp_bind:get_processes(ETS);
+        [] -> []
+    end.
 
 %%------------------------------------------------------------------------------
 get_default_bind() ->

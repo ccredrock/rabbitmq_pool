@@ -70,7 +70,7 @@ init([{Pool, Prop}]) ->
     case do_reborn_deads(rmp_util:parse_pool(Pool, Prop),
                          #state{process_ets = Processes, deads = []}) of
         #state{deads = []} = State ->
-            rabbitmq_pool:add_bind(Pool, Processes),
+            rabbitmq_pool:add_bind(Pool, Prop, Processes),
             {ok, State, 0};
         #state{deads = [Dead | _]} ->
             {error, {fail_connect, {Dead, get(reborn_fail)}}}
@@ -107,7 +107,7 @@ handle_info(_Info, State) ->
 
 do_reborn_deads([{connect, Prop} = H | T],
                #state{connects = ConnectSet, deads = Deads} = State) ->
-    case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
+    case rmp_util:connect(Prop) of
         {ok, Connect} ->
             ?INFO("conenct start:~p,~p", [Connect, Prop]),
             erlang:monitor(process, Connect),

@@ -8,7 +8,7 @@
 
 -export([get_deads/1,
          get_connects/1,
-         get_channels/3]).
+         get_channels/1]).
 
 %% callbacks
 -export([start_link/1]).
@@ -39,12 +39,8 @@ get_deads(Proc) ->
 get_connects(Proc) ->
     [X || {X, _} <- maps:to_list(element(#state.connects, sys:get_state(Proc)))].
 
-get_channels(Proc, Channels, Busy) ->
-    State = sys:get_state(Proc),
-    [{all, [X || {X, _} <- ets:tab2list(Channels)]},
-     {wait, element(#state.lone_wait, State)},
-     {free, element(#state.lone_free, State)},
-     {busy, ets:tab2list(Busy)}].
+get_channels(Channels) ->
+    [X || {X, _} <- ets:tab2list(Channels)].
 
 %%------------------------------------------------------------------------------
 %% @doc gen_server
@@ -59,7 +55,7 @@ init([{Pool, Prop}]) ->
     case do_reborn_deads(rmp_util:parse_pool(Pool, Prop),
                          #state{channel_ets = Channels, busy_ets = Busy, deads = []}) of
         #state{deads = []} = State ->
-            rabbitmq_pool:add_lone(Pool, Channels, Busy),
+            rabbitmq_pool:add_lone(Pool, Prop, Channels, Busy),
             {ok, State, 0};
         #state{deads = [Dead | _]} ->
             {error, {fail_connect, {Dead, get(reborn_fail)}}}
@@ -96,7 +92,7 @@ handle_info(_Info, State) ->
 
 do_reborn_deads([{connect, Prop} = H | T],
                #state{connects = ConnectSet, deads = Deads} = State) ->
-    case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
+    case rmp_util:connect(Prop) of
         {ok, Connect} ->
             ?INFO("conenct start:~p,~p", [Connect, Prop]),
             erlang:monitor(process, Connect),
