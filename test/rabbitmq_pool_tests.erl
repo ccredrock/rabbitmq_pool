@@ -90,7 +90,7 @@ get_bind_channels() ->
     rabbitmq_pool:get_channels(rabbitmq_2332).
 
 get_lone_channels() ->
-    proplists:get_value(all, rabbitmq_pool:get_channels(rabbitmq_2331)).
+    rabbitmq_pool:get_channels(rabbitmq_2331).
 
 get_connects() ->
     rabbitmq_pool:get_connects(rabbitmq_2332)

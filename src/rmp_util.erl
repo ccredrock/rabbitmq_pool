@@ -51,19 +51,19 @@ safe_eval(PID, Fun) ->
 safe_eval(PID, Fun, Cnt) ->
     safe_eval(PID, Fun, -1, Cnt).
 
-safe_eval(_PID, _Fun, Cnt, Cnt) -> {error, max_retry};
-safe_eval(PID, Fun, RetryCnt, _Cnt) ->
+safe_eval(_PID, _Fun, Cnt, MaxCnt) when Cnt >= MaxCnt -> {error, max_retry};
+safe_eval(PID, Fun, RetryCnt, Cnt) ->
     Ref = erlang:monitor(process, PID),
     case erlang:is_process_alive(PID) of
         false ->
-            safe_eval(PID, Fun, RetryCnt + 1);
+            safe_eval(PID, Fun, RetryCnt + 1, Cnt);
         true ->
             case catch Fun(PID) of
                 {'EXIT', Reason} -> {error, Reason};
                 _ ->
                     case receive {'DOWN', Ref, process, _, _} -> false after 0 -> true end of
                         false ->
-                            safe_eval(PID, Fun, RetryCnt + 1);
+                            safe_eval(PID, Fun, RetryCnt + 1, Cnt);
                         true ->
                             erlang:demonitor(Ref), {ok, RetryCnt}
                     end

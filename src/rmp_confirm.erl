@@ -48,10 +48,11 @@ start(Args) ->
 
 %%------------------------------------------------------------------------------
 init([{Channel, Pool}]) ->
+    process_flag(trap_exit, true),
     amqp_channel:register_confirm_handler(Channel, self()),
     SeqNo = amqp_channel:next_publish_seqno(Channel),
     #'confirm.select_ok'{} = amqp_channel:call(Channel, #'confirm.select'{}),
-    case rmp_bind:take_legacy(Pool) of
+    case rmp_bank:take_legacy(Pool) of
         undefined ->
             {ok, #state{pool = Pool, channel = Channel, seqno = SeqNo}, 0};
         List ->
@@ -82,7 +83,7 @@ code_change(_OldVsn, State, _Extra) ->
 terminate(_Reason, State) ->
     case [Waiter || {_, Waiter} <- maps:to_list(State#state.waiters)] ++ State#state.retrys of
         [] -> ok;
-        Retrys -> ok = rmp_bind:add_legacy(State#state.pool, Retrys)
+        Retrys -> ok = rmp_bank:add_legacy(State#state.pool, Retrys)
     end.
 
 %%------------------------------------------------------------------------------
@@ -143,5 +144,5 @@ check_timeout(#state{waiters = Waiters} = State) ->
     maps:fold(Fun, State, Waiters).
 
 retry_publish(#state{retrys = Retrys} = State) ->
-    lists:foldl(fun(Water, Acc) -> try_publish(Water, Acc) end, State, Retrys).
+    lists:foldl(fun(Water, Acc) -> try_publish(Water, Acc) end, State#state{retrys = []}, Retrys).
 

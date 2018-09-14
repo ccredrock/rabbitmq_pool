@@ -17,7 +17,12 @@
 
 %%------------------------------------------------------------------------------
 start_link() ->
-    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    {ok, Sup} = supervisor:start_link({local, ?MODULE}, ?MODULE, []),
+    {ok, _} = supervisor:start_child(?MODULE, {rmp_bank,
+                                               {rmp_bank, start_link, []},
+                                               transient, infinity, worker,
+                                               [rmp_bank]}),
+    {ok, Sup}.
 
 init([]) ->
     {ok, {{one_for_one, 1, 60}, []}}.

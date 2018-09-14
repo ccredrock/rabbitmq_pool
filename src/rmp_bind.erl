@@ -12,9 +12,6 @@
          get_channels/1,
          get_processes/1]).
 
--export([add_legacy/2,
-         take_legacy/1]).
-
 %% callbacks
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -26,11 +23,10 @@
 
 -include("rabbitmq_pool.hrl").
 
--define(TIMEOUT, 5000).
+-define(TIMEOUT, 3000).
 
 -record(state, {process_ets  = 0,
                 connects     = #{},
-                legacy       = [],
                 bind_channel = #{},
                 deads        = []}).
 
@@ -48,15 +44,6 @@ get_channels(Proc) ->
 
 get_processes(ETS) ->
     [X || {X, _} <- ets:tab2list(ETS)].
-
-add_legacy(Pool, V) ->
-    gen_server:call(rabbitmq_pool:pool_process(Pool), {add_legacy, V}).
-
-take_legacy(Pool) ->
-    case catch gen_server:call(rabbitmq_pool:pool_process(Pool), take_legacy) of
-        {'EXIT', _} -> undefined;
-        Result -> Result
-    end.
 
 %%------------------------------------------------------------------------------
 %% @doc gen_server
@@ -76,12 +63,6 @@ init([{Pool, Prop}]) ->
             {error, {fail_connect, {Dead, get(reborn_fail)}}}
     end.
 
-handle_call({add_legacy, V}, _From, #state{legacy = L} = State) ->
-    {reply, ok, State#state{legacy = [V | L]}};
-handle_call(take_legacy, _From, #state{legacy = []} = State) ->
-    {reply, undefined, State};
-handle_call(take_legacy, _From, #state{legacy = [V | L]} = State) ->
-    {reply, V, State#state{legacy = L}};
 handle_call(_Call, _From, State) ->
     {reply, ok, State}.
 
@@ -186,7 +167,7 @@ do_find_deads(PID, Reason,
         throw:bind_channel_dead ->
             {ok, #{connect := Connect, prop := Prop} = M} = maps:find(PID, BChannelSet),
             ?INFO("bind channel stop:~p, ~p, ~p", [PID, Reason, Prop]),
-            catch exit(maps:get(process, M, undefined), shutdown),
+            catch gen_server:stop(maps:get(process, M, undefined)),
             State#state{bind_channel = maps:remove(PID, BChannelSet),
                         deads = [{channel, Connect, Prop} | Deads]}
     end.
