@@ -60,6 +60,7 @@ start() ->
     application:ensure_all_started(?MODULE).
 
 init() ->
+    rmp_util:init(),
     ets:new(?MODULE, [named_table, public, {read_concurrency, true}, {keypos, #pool.name}]),
     ets:new(rmp_confirm, [named_table, public, {read_concurrency, true}, {keypos, #pool.name}]),
     add_pools(get_pools_props()).

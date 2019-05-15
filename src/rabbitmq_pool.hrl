@@ -17,7 +17,8 @@
                              port         = proplists:get_value(port, List, 5672),
                              username     = proplists:get_value(username, List, <<"guest">>),
                              password     = proplists:get_value(password, List, <<"guest">>),
-                             virtual_host = proplists:get_value(virtual_host, List, <<"/">>)}).
+                             virtual_host = proplists:get_value(virtual_host, List, <<"/">>),
+                             connection_timeout = proplists:get_value(connection_timeout, List, 5000)}).
 
 -endif.
 

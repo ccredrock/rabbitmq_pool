@@ -6,6 +6,7 @@
 %%%-------------------------------------------------------------------
 -module(rmp_util).
 
+-export([init/0]).
 -export([parse_pool/2]).
 -export([map_set/4, map_add/4, map_del/4]).
 -export([safe_cast/2, safe_eval/2]).
@@ -18,6 +19,10 @@
 
 %%------------------------------------------------------------------------------
 %% interface
+%%------------------------------------------------------------------------------
+init() ->
+    ets:new(?MODULE, [public, named_table]).
+
 %%------------------------------------------------------------------------------
 parse_pool(Pool, Prop) ->
     lists:duplicate(proplists:get_value(connect_size, Prop, 1), {connect, [{pool, Pool} | Prop]}).
@@ -70,6 +75,7 @@ safe_eval(PID, Fun, RetryCnt, Cnt) ->
             end
     end.
 
+%%------------------------------------------------------------------------------
 connect(Prop) ->
     case proplists:get_value(nodes, Prop) of
         undefined ->
@@ -80,10 +86,34 @@ connect(Prop) ->
     end.
 
 connect1([Prop | T], _) ->
-    case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
-        {ok, Connect} -> {ok, Connect};
-        Result -> connect1(T, Result)
+    case is_available_node(Prop) of
+        false ->
+            connect1(T, {error, disable_node});
+        true ->
+            case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
+                {ok, Connect} ->
+                    {ok, Connect};
+                Result ->
+                    ?WARN("conenct fail disable node:~p,~p", [Prop, Result]),
+                    disable_node(Prop),
+                    connect1(T, Result)
+            end
     end;
 connect1([], Result) ->
     Result.
+
+disable_node(Prop) ->
+    Host = proplists:get_value(host, Prop),
+    Port = proplists:get_value(port, Prop),
+    ets:insert(?MODULE, {{disable_node, Host, Port}, erlang:system_time(milli_seconds)}).
+
+is_available_node(Prop) ->
+    Host = proplists:get_value(host, Prop),
+    Port = proplists:get_value(port, Prop),
+    Now = erlang:system_time(milli_seconds),
+    Timeout = application:get_env(rabbitmq_pool, disable_timeout, 5000),
+    case ets:lookup(?MODULE, {disable_node, Host, Port}) of
+        [{_, Last}] when Now - Last =< Timeout -> false;
+        _ -> true
+    end.
 
