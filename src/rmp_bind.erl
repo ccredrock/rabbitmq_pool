@@ -23,7 +23,7 @@
 
 -include("rabbitmq_pool.hrl").
 
--define(TIMEOUT, 3000).
+-define(TIMEOUT, 1000).
 
 -record(state, {process_ets  = 0,
                 connects     = #{},
@@ -57,6 +57,7 @@ init([{Pool, Prop}]) ->
     case do_reborn_deads(rmp_util:parse_pool(Pool, Prop),
                          #state{process_ets = Processes, deads = []}) of
         #state{deads = []} = State ->
+            ?INFO("bind start:~p", [Pool]),
             rabbitmq_pool:add_bind(Pool, Prop, Processes),
             {ok, State, 0};
         #state{deads = [Dead | _]} ->
@@ -96,6 +97,7 @@ do_reborn_deads([{connect, Prop} = H | T],
             State1 = State#state{connects = ConnectSet#{Connect => #{prop => Prop, childs => []}}},
             do_reborn_deads(T ++ List, State1);
         Reason ->
+            ?WARN("conenct start fail:~p,~p", [Reason, Prop]),
             put(reborn_fail, Reason),
             do_reborn_deads(T, State#state{deads = [H | Deads]})
     end;
@@ -110,6 +112,7 @@ do_reborn_deads([{channel, Connect, Prop} = H | T],
                     BChannelSet1 = BChannelSet#{Channel => #{connect => Connect, prop => Prop}},
                     do_reborn_deads(T ++ [{process, Connect, Channel, Prop}], State#state{bind_channel = BChannelSet1});
                 Reason ->
+                    ?WARN("bind channel start fail:~p,~p", [Reason, Prop]),
                     put(reborn_fail, Reason),
                     do_reborn_deads(T, State#state{deads = [H | Deads]})
             end;
@@ -135,6 +138,7 @@ do_reborn_deads([{process, Connect, Channel, Prop} = H | T],
                     ets:insert(State#state.process_ets, {Process, #{connect => Connect, channel => Channel, prop => Prop}}),
                     do_reborn_deads(T, State#state{bind_channel = BChannelSet1, connects = ConnectSet1});
                 Reason ->
+                    ?WARN("bind process start fail:~p,~p", [Reason, Prop]),
                     put(reborn_fail, Reason),
                     process_flag(trap_exit, false),
                     do_reborn_deads(T, State#state{deads = [H | Deads]})
@@ -150,14 +154,23 @@ do_find_deads(PID, Reason,
     try
         maps:is_key(PID, ConnectSet) andalso throw(connect_dead),
         ets:lookup(State#state.process_ets, PID) =/= [] andalso throw(bind_process_dead),
-        maps:is_key(PID, BChannelSet) andalso throw(bind_channel_dead)
+        maps:is_key(PID, BChannelSet) andalso throw(bind_channel_dead),
+        State
     catch
         throw:connect_dead ->
             {ok, #{childs := Childs, prop := Prop}} = maps:find(PID, ConnectSet),
-            ?INFO("connect stop:~p, ~p, ~p", [PID, Reason, Prop]),
-            ConnectSet1 = maps:remove(PID, ConnectSet),
+            ?INFO("connect stop try stop connect consumer:~p, ~p, ~p, ~p", [PID, Reason, Prop, Childs]),
             [exit(Process, shutdown) || Process <- Childs],
-            State#state{connects = ConnectSet1, deads = [{connect, Prop} | Deads]};
+            case lists:member(consume, proplists:get_value(connect_method, Prop, []))
+                 andalso (proplists:get_value(nodes, Prop) > []
+                          orelse lists:member(proxy_rr, proplists:get_value(connect_method, Prop, []))) of
+                true ->
+                    ?INFO("connect stop try refresh pool:~p, ~p, ~p", [maps:keys(ConnectSet), Reason, Prop]),
+                    [catch amqp_connection:close(X) || X <- maps:keys(ConnectSet) -- [PID]],
+                    State#state{connects = #{}, deads = [{connect, Y} || #{prop := Y} <- maps:values(ConnectSet)] ++ Deads};
+                _ ->
+                    State#state{connects = maps:remove(PID, ConnectSet), deads = [{connect, Prop} | Deads]}
+            end;
         throw:bind_process_dead ->
             [{PID, #{connect := Connect, channel := Channel, prop := Prop}}] = ets:lookup(State#state.process_ets, PID),
             ets:delete(State#state.process_ets, PID),

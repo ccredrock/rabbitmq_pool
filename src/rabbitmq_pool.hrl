@@ -18,7 +18,8 @@
                              username     = proplists:get_value(username, List, <<"guest">>),
                              password     = proplists:get_value(password, List, <<"guest">>),
                              virtual_host = proplists:get_value(virtual_host, List, <<"/">>),
-                             connection_timeout = proplists:get_value(connection_timeout, List, 5000)}).
+                             heartbeat    = proplists:get_value(heartbeat, List, 7),
+                             connection_timeout = proplists:get_value(connection_timeout, List, 100)}).
 
 -endif.
 

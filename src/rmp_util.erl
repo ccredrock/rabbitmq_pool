@@ -29,12 +29,20 @@ parse_pool(Pool, Prop) ->
 
 %%------------------------------------------------------------------------------
 map_set(Map, PKey, CKey, CVal) ->
-    #{PKey := PVal} = Map,
-    Map#{PKey => PVal#{CKey => CVal}}.
+    case maps:find(PKey, Map) of
+        {ok, PVal} ->
+            Map#{PKey => PVal#{CKey => CVal}};
+        error ->
+            Map#{PKey => #{CKey => CVal}}
+    end.
 
 map_add(Map, PKey, CKey, CVal) ->
-    #{PKey := #{CKey := List} = PVal} = Map,
-    Map#{PKey => PVal#{CKey => [CVal | List]}}.
+    case maps:find(PKey, Map) of
+        {ok,  #{CKey := List} = PVal} ->
+            Map#{PKey => PVal#{CKey => [CVal | List]}};
+        error ->
+            Map#{PKey => #{CKey => [CVal]}}
+    end.
 
 map_del(Map, PKey, CKey, CVal) ->
     case maps:find(PKey, Map) of
@@ -77,29 +85,49 @@ safe_eval(PID, Fun, RetryCnt, Cnt) ->
 
 %%------------------------------------------------------------------------------
 connect(Prop) ->
-    case proplists:get_value(nodes, Prop) of
-        undefined ->
-            connect1([Prop], undefined);
-        List ->
-            Prop1 = proplists:delete(port, proplists:delete(host, Prop)),
-            connect1(lists:sort([Prop1 ++ [{host, Host}, {port, Port}] || {Host, Port} <- List]), undefined)
+    Prop1 = form_connect_prop(Prop),
+    case lists:member(proxy_rr, proplists:get_value(connect_method, Prop, [])) of
+        true -> connect_proxy_rr(Prop1);
+        _ -> connect_ips(Prop1, undefined)
     end.
 
-connect1([Prop | T], _) ->
+form_connect_prop(Prop) ->
+    case proplists:get_value(nodes, Prop) of
+        undefined ->
+            [Prop];
+        List ->
+            Prop1 = proplists:delete(port, proplists:delete(host, Prop)),
+            lists:sort([Prop1 ++ [{host, Host}, {port, Port}] || {Host, Port} <- List])
+    end.
+
+connect_proxy_rr([Prop]) ->
+    case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
+        {ok, Connect} ->
+            {ok, Connect};
+        _ ->
+            case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
+                {ok, Connect} ->
+                    {ok, Connect};
+                Result ->
+                    Result
+            end
+    end.
+
+connect_ips([Prop | T], _) ->
     case is_available_node(Prop) of
         false ->
-            connect1(T, {error, disable_node});
-        true ->
+            connect_ips(T, {error, disable_node});
+        _ ->
             case catch amqp_connection:start(?AMQP_NETWORK(Prop)) of
                 {ok, Connect} ->
                     {ok, Connect};
                 Result ->
                     ?WARN("conenct fail disable node:~p,~p", [Prop, Result]),
                     disable_node(Prop),
-                    connect1(T, Result)
+                    connect_ips(T, Result)
             end
     end;
-connect1([], Result) ->
+connect_ips([], Result) ->
     Result.
 
 disable_node(Prop) ->
@@ -111,7 +139,7 @@ is_available_node(Prop) ->
     Host = proplists:get_value(host, Prop),
     Port = proplists:get_value(port, Prop),
     Now = erlang:system_time(milli_seconds),
-    Timeout = application:get_env(rabbitmq_pool, disable_timeout, 5000),
+    Timeout = application:get_env(rabbitmq_pool, disable_timeout, 1000),
     case ets:lookup(?MODULE, {disable_node, Host, Port}) of
         [{_, Last}] when Now - Last =< Timeout -> false;
         _ -> true
